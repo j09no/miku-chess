@@ -1,0 +1,292 @@
+<!DOCTYPE html>
+<html lang="hi"><head>
+<script>
+window.__VOICE_FILES = ['start_1.mp3','start_2.mp3','start_3.mp3','start_4.mp3','start_5.mp3','start_6.mp3','start_7.mp3','start_8.mp3','start_9.mp3','start_10.mp3'];
+window.require = function(name){
+  if (name === 'http') return { createServer: function(cb){ window.__handler = cb; return { listen: function(){} }; } };
+  if (name === 'fs') return {
+    readdirSync: function(){ return window.__VOICE_FILES; },
+    readFileSync: function(){ return new Uint8Array(0); },
+    existsSync: function(){ return true; },
+    readFile: function(p, cb){ if (cb) cb(null, new Uint8Array(0)); }
+  };
+  if (name === 'path') return {
+    join: function(){ var a = [].slice.call(arguments).filter(Boolean); return a.join('/').replace(/\/+/, '/'); },
+    basename: function(p){ return String(p).split('/').pop(); }
+  };
+  if (name === 'crypto') return {
+    randomInt: function(a, b){ return a + Math.floor(Math.random() * ((b || 0) - a)); },
+    randomUUID: function(){ return 'u-' + Math.random().toString(36).slice(2) + Math.random().toString(36).slice(2); }
+  };
+  return {};
+};
+window.__dirname = '.';
+</script>
+<script src="engine.js"></script>
+<script src="api-shim.js"></script>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Miku Chess</title>
+<style>
+*{box-sizing:border-box;margin:0}
+body{background:#1b1a17;color:#eee;font-family:'Segoe UI',system-ui,sans-serif}
+#top{display:flex;gap:8px;align-items:center;padding:10px 14px;background:#242320;border-bottom:2px solid #3a382f;flex-wrap:wrap}
+#top h1{font-size:18px;color:#ff9ad5;margin-right:6px}
+select,button,input{background:#2e2c27;color:#eee;border:1px solid #4a483e;border-radius:8px;padding:6px 10px;font-size:13px;cursor:pointer}
+button:hover{background:#3a3830}
+button.warn{border-color:#a33}
+#main{display:flex;gap:16px;padding:16px;justify-content:center;align-items:flex-start;flex-wrap:wrap}
+#board{display:grid;grid-template-columns:repeat(8,60px);grid-template-rows:repeat(8,60px);border:3px solid #4a483e;border-radius:6px;user-select:none}
+.sq{display:flex;align-items:center;justify-content:center;font-size:42px;cursor:pointer;position:relative}
+.sq.l{background:#f0d9b5}.sq.d{background:#b58863}
+.pc{line-height:1;pointer-events:none}
+.wpc{color:#fff;text-shadow:0 0 2px #000,1px 1px 0 #000,-1px -1px 0 #000,1px -1px 0 #000,-1px 1px 0 #000}
+.bpc{color:#1c1b18;text-shadow:0 0 1px #999}
+.sq.sel{outline:3px solid #ffd24a;outline-offset:-3px}
+.sq.last{box-shadow:inset 0 0 0 3px rgba(80,160,255,.7)}
+.sq.check{box-shadow:inset 0 0 0 4px rgba(255,60,60,.9)}
+.sq.dot::after{content:'';width:14px;height:14px;border-radius:50%;position:absolute;opacity:.9;z-index:2}
+.dot.n::after{background:rgba(60,90,60,.9)}
+.dot.g::after{background:#4caf50}.dot.y::after{background:#ffc107}.dot.r::after{background:#e53935}
+.sq.danger{box-shadow:inset 0 0 0 3px rgba(255,40,40,.85);animation:pulse 1.2s infinite}
+@keyframes pulse{50%{box-shadow:inset 0 0 0 7px rgba(255,40,40,.45)}}
+.sq.victim{box-shadow:inset 0 0 0 4px rgba(255,0,0,.95);animation:pulse .8s infinite}
+.sq.prey{box-shadow:inset 0 0 0 4px rgba(60,220,120,.95)}
+.sq.atkmove{box-shadow:inset 0 0 0 3px rgba(80,220,120,.6)}
+#panel{width:370px;max-width:94vw;display:flex;flex-direction:column;gap:10px}
+.card{background:#242320;border:1px solid #3a382f;border-radius:10px;padding:10px}
+#bubble{min-height:48px;background:linear-gradient(135deg,#3a2438,#241a2e);border:1px solid #b06ab3;border-radius:12px;padding:10px;font-size:14px;color:#ffd9f2}
+#bubble b{color:#ff9ad5}
+#status{font-size:13px;line-height:1.5}
+#chatlog{height:150px;overflow-y:auto;font-size:13px;display:flex;flex-direction:column;gap:4px}
+.me{color:#9fd6ff}.miku{color:#ff9ad5}.sys{color:#888;font-size:12px}
+#chatrow{display:flex;gap:6px;margin-top:6px}
+#chatin{flex:1}
+#analysis{font-size:12px;line-height:1.65;min-height:50px;color:#ccc}
+#analysis b{color:#ffd24a}
+#moves{font-size:12px;max-height:110px;overflow-y:auto;line-height:1.6;color:#bbb}
+.tgl{display:flex;gap:12px;align-items:center;font-size:12px;color:#bbb;flex-wrap:wrap}
+.tgl label{display:flex;gap:4px;align-items:center;cursor:pointer}
+.small{font-size:11px;color:#888}
+@media(max-width:700px){#board{grid-template-columns:repeat(8,11vw);grid-template-rows:repeat(8,11vw)}.sq{font-size:7vw}}
+</style></head>
+<body>
+<div id="top">
+  <h1>&#9821; Miku Chess</h1>
+  <select id="elo"><option value="400">Miku 400 (baby)</option><option value="800">Miku 800</option><option value="1200" selected>Miku 1200</option><option value="1600">Miku 1600</option><option value="2000">Miku 2000 (beast)</option></select>
+  <select id="side"><option value="w" selected>Tu White</option><option value="b">Tu Black</option></select>
+  <select id="mood"><option value="normal" selected>Mood: Normal</option><option value="soft">Mood: Soft</option><option value="savage">Mood: Savage</option></select>
+  <button id="new">New Game</button>
+  <button id="undo">Undo</button>
+  <button id="resign" class="warn">Resign</button>
+</div>
+<div id="main">
+  <div><div id="board"></div>
+    <div class="tgl" style="margin-top:8px">
+      <label><input type="checkbox" id="tvoice" checked> Voice</label>
+      <label><input type="checkbox" id="tdanger" checked> Danger glow</label>
+      <label><input type="checkbox" id="thints" checked> Hints</label>
+    </div>
+    <div class="small" style="margin-top:6px">Piece pe click = moves + probability &middot; Enemy piece pe click = threat report &middot; Red glow = wahan piece girega</div>
+  </div>
+  <div id="panel">
+    <div id="bubble"><b>Miku:</b> Ready hoon boss! New Game dabao.</div>
+    <div class="card" id="status">—</div>
+    <div class="card"><div style="font-size:12px;color:#888;margin-bottom:4px">ANALYSIS</div><div id="analysis">Piece pe click kar...</div></div>
+    <div class="card">
+      <div style="font-size:12px;color:#888;margin-bottom:4px">CHAT — Miku voice me jawab degi</div>
+      <div id="chatlog"></div>
+      <div id="chatrow"><input id="chatin" placeholder="Miku se baat kar..."><button id="chatsend">Bhej</button></div>
+    </div>
+    <div class="card"><div style="font-size:12px;color:#888;margin-bottom:4px">MOVES / PGN</div><div id="moves">—</div></div>
+  </div>
+</div>
+<script>
+var S = null, sel = -1, analysis = null, userColor = 'w';
+var VOICE = true, DANGER = true, HINTS = true;
+var lastAct = Date.now();
+var GLYPH = {k:'\\u265A',q:'\\u265B',r:'\\u265C',b:'\\u265D',n:'\\u265E',p:'\\u265F'};
+var EMO = {neutral:[1,1,1],cheerful:[1.08,1.25,1],sad:[0.85,0.85,1],angry:[1.15,1.35,1],'cry loudly':[0.8,1.05,1],giggles:[1.05,1.3,1],playful:[1.05,1.2,1],whisper:[0.9,1.05,0.45],'evil giggle':[1.1,1.15,1],sigh:[0.85,0.9,0.8]};
+function col(p){return p?(p===p.toUpperCase()?'w':'b'):null;}
+function $(id){return document.getElementById(id);}
+
+function render(){
+  var b = $('board'); b.innerHTML = '';
+  var flipped = userColor === 'b';
+  for (var vi=0; vi<64; vi++){
+    var idx = flipped ? 63-vi : vi;
+    var d = document.createElement('div');
+    d.className = 'sq ' + ((((idx/8|0)+idx%8)%2) ? 'd':'l');
+    d.setAttribute('data-sq', idx);
+    var p = S.board[idx];
+    if (p){ var sp=document.createElement('span'); sp.className='pc '+(col(p)==='w'?'wpc':'bpc'); sp.textContent=GLYPH[p.toLowerCase()]; d.appendChild(sp); }
+    if (DANGER && S.danger && S.danger.indexOf(idx)>=0) d.classList.add('danger');
+    if (S.lastMove && (S.lastMove.from===idx || S.lastMove.to===idx)) d.classList.add('last');
+    if (S.check && S.checkSq===idx) d.classList.add('check');
+    b.appendChild(d);
+  }
+  applyHighlights();
+  var mat = S.material || {};
+  $('status').innerHTML = 'Turn: <b>' + (S.turn===userColor?'TU':'Miku') + '</b> &middot; Material: Tu ' + (mat.you||0) + ' vs Miku ' + (mat.miku||0) +
+    '<br>Elo: ' + S.elo + ' &middot; Mood: ' + S.mood + (S.over ? '<br><b style="color:#ff9ad5">GAME OVER: ' + S.over.reason + ' (' + S.over.result + ')</b>' : '');
+  var pairs = '';
+  for (var i=0;i<S.history.length;i+=2){ pairs += ((i/2)+1) + '. ' + S.history[i] + (S.history[i+1]?' '+S.history[i+1]:'') + '<br>'; }
+  $('moves').innerHTML = pairs || '—';
+}
+
+function applyHighlights(){
+  var cells = document.querySelectorAll('.sq');
+  for (var i=0;i<cells.length;i++){
+    var idx = parseInt(cells[i].getAttribute('data-sq'));
+    if (idx === sel) cells[i].classList.add('sel');
+    if (!analysis) continue;
+    if (analysis.victims && analysis.victims.indexOf(idx) >= 0) cells[i].classList.add('victim');
+    if (analysis.prey && analysis.prey.indexOf(idx) >= 0) cells[i].classList.add('prey');
+    if (analysis.atkMoves && analysis.atkMoves.indexOf(idx) >= 0) cells[i].classList.add('atkmove');
+  }
+  if (sel >= 0 && HINTS && S.legal){
+    for (var j=0;j<cells.length;j++){
+      var sq2 = parseInt(cells[j].getAttribute('data-sq'));
+      for (var k=0;k<S.legal.length;k++){
+        var mv2 = S.legal[k];
+        if (mv2.from === sel && mv2.to === sq2){
+          cells[j].classList.add('dot');
+          var cls = 'n';
+          if (mv2.cap){
+            cls = 'y';
+            if (analysis && analysis.capPct && analysis.capPct[sq2] !== undefined){
+              var pct = analysis.capPct[sq2];
+              cls = pct >= 70 ? 'g' : (pct >= 45 ? 'y' : 'r');
+            }
+          }
+          cells[j].classList.add(cls);
+        }
+      }
+    }
+  }
+}
+
+function bubble(t){ $('bubble').innerHTML = '<b>Miku:</b> ' + t; }
+
+var TTSVOICE = null;
+function pickTTSVoice(){
+  var vs = speechSynthesis.getVoices();
+  var pref = vs.filter(function(v){ return /female|zira|aria|heera|kalpana|swara|woman/i.test(v.name); });
+  var hi = vs.filter(function(v){ return /^hi/i.test(v.lang); });
+  TTSVOICE = pref[0] || hi[0] || vs[0] || null;
+}
+if (window.speechSynthesis){ pickTTSVoice(); speechSynthesis.onvoiceschanged = pickTTSVoice; }
+function speakTTS(text, emo){
+  if (!VOICE || !window.speechSynthesis) return;
+  try {
+    speechSynthesis.cancel();
+    var u = new SpeechSynthesisUtterance(text);
+    if (TTSVOICE) u.voice = TTSVOICE;
+    u.lang = 'hi-IN';
+    var e = EMO[emo] || EMO.neutral;
+    u.rate = e[0]; u.pitch = e[1]; u.volume = e[2];
+    speechSynthesis.speak(u);
+  } catch(err){}
+}
+function playVoice(cat){
+  if (!VOICE) return;
+  fetch('/api/voice?cat=' + cat + '&n=' + Math.random()).then(function(r){return r.json();}).then(function(v){
+    if (v.mode === 'mp3'){ var a = new Audio(v.url); a.play().catch(function(){}); }
+    else speakTTS(v.text, v.emotion);
+    if (v.text) bubble(v.text);
+  }).catch(function(){});
+}
+
+function refresh(s){ S = s; userColor = s.userColor; sel = -1; analysis = null; render(); }
+
+function doMove(from, to){
+  lastAct = Date.now();
+  fetch('/api/move', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({from:from, to:to})})
+  .then(function(r){return r.json();}).then(function(res){
+    if (!res.ok){ bubble('Illegal move boss! ' + (res.error||'')); return; }
+    refresh(res.state);
+    if (res.aiVoice && res.aiVoice.text) bubble(res.aiVoice.text);
+    else if (res.ai) bubble('Miku: ' + res.ai.san);
+    if (res.ai) playVoice(res.ai.cat);
+    if (res.oppCat){ setTimeout(function(){ playVoice(res.oppCat); }, 2800); }
+    if (res.over && res.over.reason){
+      setTimeout(function(){
+        var c = res.over.result === '1/2-1/2' ? 'draw' : ((res.over.result==='1-0'&&userColor==='w')||(res.over.result==='0-1'&&userColor==='b') ? 'win' : 'lose');
+        playVoice(c);
+      }, 5600);
+    }
+  }).catch(function(){ bubble('Network error...'); });
+}
+
+function fetchAnalysis(sq){
+  fetch('/api/analysis?sq=' + sq).then(function(r){return r.json();}).then(function(a){
+    if (a.empty) { $('analysis').innerHTML = 'Khali square.'; return; }
+    analysis = a; render();
+    var h = '<b>' + a.alg + '</b> (' + a.pieceName + ')<br>';
+    h += 'Attackers: ' + a.attackerStr + '<br>Defenders: ' + a.defenderStr + '<br>';
+    if (a.verdict) h += 'Verdict: <b>' + a.verdict + '</b><br>';
+    if (a.capLines && a.capLines.length) h += 'Captures: ' + a.capLines.join(' | ');
+    $('analysis').innerHTML = h;
+  }).catch(function(){});
+}
+
+document.getElementById('board').addEventListener('click', function(ev){
+  var t = ev.target.closest('.sq'); if (!t || !S || S.over) return;
+  lastAct = Date.now();
+  var sq = parseInt(t.getAttribute('data-sq'));
+  var p = S.board[sq];
+  if (sel >= 0){
+    for (var k=0;k<S.legal.length;k++){
+      if (S.legal[k].from===sel && S.legal[k].to===sq){ doMove(sel, sq); return; }
+    }
+  }
+  if (p && col(p) === userColor && S.turn === userColor){
+    sel = sq;
+    fetchAnalysis(sq);
+    render();
+  } else if (p){
+    sel = -1;
+    fetchAnalysis(sq);
+    render();
+  } else { sel = -1; analysis = null; render(); }
+});
+
+$('new').onclick = function(){
+  fetch('/api/new', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({elo: parseInt($('elo').value), side: $('side').value, mood: $('mood').value})})
+  .then(function(r){return r.json();}).then(function(res){
+    refresh(res.state);
+    if (res.aiVoice && res.aiVoice.text) bubble(res.aiVoice.text);
+    if (res.ai) playVoice(res.ai.cat); else playVoice('start');
+  });
+};
+$('undo').onclick = function(){ fetch('/api/undo', {method:'POST'}).then(function(r){return r.json();}).then(function(res){ refresh(res.state); }); };
+$('resign').onclick = function(){ if (!confirm('Resign?')) return; fetch('/api/resign', {method:'POST'}).then(function(r){return r.json();}).then(function(res){ refresh(res.state); playVoice('lose'); }); };
+$('mood').onchange = function(){ fetch('/api/mood', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({mood: $('mood').value})}); };
+$('tvoice').onchange = function(){ VOICE = $('tvoice').checked; };
+$('tdanger').onchange = function(){ DANGER = $('tdanger').checked; render(); };
+$('thints').onchange = function(){ HINTS = $('thints').checked; render(); };
+
+function addChat(who, text){
+  var d = document.createElement('div');
+  d.className = who; d.textContent = (who==='me'?'Tu: ':who==='miku'?'Miku: ':'') + text;
+  var log = $('chatlog'); log.appendChild(d); log.scrollTop = log.scrollHeight;
+}
+function sendChat(){
+  var t = $('chatin').value.trim(); if (!t) return;
+  $('chatin').value = '';
+  addChat('me', t);
+  fetch('/api/chat', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({text: t})})
+  .then(function(r){return r.json();}).then(function(res){
+    if (res.reply){ addChat('miku', res.reply.text); speakTTS(res.reply.text, res.reply.emotion); bubble(res.reply.text); }
+  });
+}
+$('chatsend').onclick = sendChat;
+$('chatin').addEventListener('keydown', function(e){ if (e.key === 'Enter') sendChat(); });
+
+setInterval(function(){
+  if (!VOICE || !S || S.over) return;
+  if (Date.now() - lastAct > 60000){ lastAct = Date.now(); playVoice('idle'); }
+}, 15000);
+
+loadState().then(function(s){ refresh(s); });
+</script></body></html>
